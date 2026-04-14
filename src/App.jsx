@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { conversationTree, SIGNAL_CONFIG } from './data/interviewFlow';
 import AdminPanel from './components/AdminPanel';
+import { supabase } from './lib/supabaseClient';
 
 const STORAGE_KEY = 'tsoralta_interviews';
 
