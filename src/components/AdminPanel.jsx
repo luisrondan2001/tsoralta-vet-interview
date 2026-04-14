@@ -1,383 +1,187 @@
-import { useState, useRef, useEffect } from 'react';
-import { conversationTree, SIGNAL_CONFIG } from './data/interviewFlow';
+import { useState, useEffect } from 'react';
 
-export default function App() {
-  const [history, setHistory] = useState([{ nodeId: 'welcome' }]);
-  const [userInput, setUserInput] = useState('');
-  const [collectedData, setCollectedData] = useState({});
-  const [signals, setSignals] = useState([]);
-  const [isEnd, setIsEnd] = useState(false);
-  const [showSummary, setShowSummary] = useState(false);
-  const chatEndRef = useRef(null);
-  const inputRef = useRef(null);
+const STORAGE_KEY = 'tsoralta_interviews';
+const ADMIN_PASSWORD = 'tsoralta2024';
 
-  const currentNodeId = history[history.length - 1]?.nodeId;
-  const currentNode = conversationTree[currentNodeId];
+export default function AdminPanel() {
+  const [authenticated, setAuthenticated] = useState(false);
+  const [password, setPassword] = useState('');
+  const [interviews, setInterviews] = useState([]);
+  const [selectedInterview, setSelectedInterview] = useState(null);
+  const [error, setError] = useState('');
 
-  // Auto-scroll al final del chat
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [history]);
-
-  // Foco en input cuando toca escribir
-  useEffect(() => {
-    if (currentNode?.inputType === 'text' && !isEnd) {
-      inputRef.current?.focus();
+    if (authenticated) {
+      loadInterviews();
     }
-  }, [currentNode, isEnd]);
+  }, [authenticated]);
 
-  const handleOptionSelect = (option) => {
-    // Guardar la respuesta seleccionada en el historial
-    const newHistory = [...history];
-    newHistory[newHistory.length - 1].userResponse = option.text;
-    
-    // Registrar señal si existe
-    if (option.signal) {
-      setSignals(prev => [...prev, { node: currentNodeId, signal: option.signal, response: option.text }]);
+  const loadInterviews = () => {
+    const stored = localStorage.getItem(STORAGE_KEY);
+    if (stored) {
+      try {
+        setInterviews(JSON.parse(stored));
+      } catch (e) {
+        setInterviews([]);
+      }
+    } else {
+      setInterviews([]);
     }
-
-    // Si hay saveAs, guardar en collectedData
-    if (currentNode.saveAs) {
-      setCollectedData(prev => ({ ...prev, [currentNode.saveAs]: option.text }));
-    }
-
-    // Si el nodo siguiente es final, marcar fin
-    const nextNode = conversationTree[option.next];
-    if (nextNode?.isEnd) {
-      setIsEnd(true);
-    }
-
-    setHistory([...newHistory, { nodeId: option.next }]);
   };
 
-  const handleTextSubmit = (e) => {
+  const handleLogin = (e) => {
     e.preventDefault();
-    if (!userInput.trim()) return;
-
-    const response = userInput.trim();
-    const newHistory = [...history];
-    newHistory[newHistory.length - 1].userResponse = response;
-
-    // Guardar en collectedData si corresponde
-    if (currentNode.saveAs) {
-      setCollectedData(prev => ({ ...prev, [currentNode.saveAs]: response }));
+    if (password === ADMIN_PASSWORD) {
+      setAuthenticated(true);
+      setError('');
+    } else {
+      setError('Contraseña incorrecta');
     }
+  };
 
-    const nextNodeId = currentNode.next;
-    const nextNode = conversationTree[nextNodeId];
-    if (nextNode?.isEnd) {
-      setIsEnd(true);
+  const deleteInterview = (id) => {
+    const updated = interviews.filter(i => i.id !== id);
+    setInterviews(updated);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+    if (selectedInterview?.id === id) setSelectedInterview(null);
+  };
+
+  const deleteAll = () => {
+    if (window.confirm('¿Seguro que quieres eliminar TODAS las entrevistas?')) {
+      setInterviews([]);
+      localStorage.removeItem(STORAGE_KEY);
+      setSelectedInterview(null);
     }
-
-    setHistory([...newHistory, { nodeId: nextNodeId }]);
-    setUserInput('');
   };
 
-  const restart = () => {
-    setHistory([{ nodeId: 'welcome' }]);
-    setUserInput('');
-    setCollectedData({});
-    setSignals([]);
-    setIsEnd(false);
-    setShowSummary(false);
+  const exportAllJSON = () => {
+    const dataStr = JSON.stringify(interviews, null, 2);
+    const blob = new Blob([dataStr], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `tsoralta_entrevistas_${new Date().toISOString().slice(0,10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
-  const generateSummary = () => {
-    const pos = signals.filter(s => s.signal === 'positive').length;
-    const neu = signals.filter(s => s.signal === 'neutral').length;
-    const neg = signals.filter(s => s.signal === 'negative').length;
-    const total = pos + neu + neg;
-    const score = total > 0 ? Math.round(((pos * 100 + neu * 50) / (total * 100)) * 100) : 0;
-
-    return { pos, neu, neg, total, score };
-  };
-
-  const summary = generateSummary();
-
-  // Renderizado de burbujas de chat
-  const renderMessages = () => {
-    return history.map((item, index) => {
-      const node = conversationTree[item.nodeId];
-      if (!node) return null;
-
-      const isLast = index === history.length - 1;
-      const showOptions = isLast && !isEnd && node.options && !item.userResponse;
-      const showInput = isLast && !isEnd && node.inputType === 'text' && !item.userResponse;
-
-      return (
-        <div key={index}>
-          {/* Burbuja del asistente */}
-          <div style={{
-            display: 'flex',
-            justifyContent: 'flex-start',
-            marginBottom: 16,
-          }}>
-            <div style={{
-              maxWidth: '80%',
-              background: 'var(--bubble-assistant)',
-              padding: '14px 18px',
-              borderRadius: '18px 18px 18px 4px',
-              boxShadow: 'var(--shadow)',
-              border: '1px solid var(--border-light)',
-            }}>
-              <p style={{ margin: 0, fontSize: 15, color: 'var(--text-dark)' }}>{node.text}</p>
-              {node.tip && (
-                <p style={{ margin: '8px 0 0', fontSize: 12, color: 'var(--text-soft)', fontStyle: 'italic' }}>
-                  💡 {node.tip}
-                </p>
-              )}
-            </div>
-          </div>
-
-          {/* Respuesta del usuario (si ya respondió) */}
-          {item.userResponse && (
-            <div style={{
-              display: 'flex',
-              justifyContent: 'flex-end',
-              marginBottom: 16,
-            }}>
-              <div style={{
-                maxWidth: '80%',
-                background: 'var(--bubble-user)',
-                padding: '12px 18px',
-                borderRadius: '18px 18px 4px 18px',
-                boxShadow: 'var(--shadow)',
-                border: '1px solid #c7d9b7',
-              }}>
-                <p style={{ margin: 0, fontSize: 15, color: 'var(--text-dark)' }}>{item.userResponse}</p>
-              </div>
-            </div>
-          )}
-
-          {/* Opciones de respuesta (botones) */}
-          {showOptions && (
-            <div style={{ marginBottom: 16, marginLeft: 8 }}>
-              <p style={{ fontSize: 13, color: 'var(--text-soft)', marginBottom: 8 }}>Seleccione una opción:</p>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {node.options.map((opt, i) => (
-                  <button
-                    key={i}
-                    onClick={() => handleOptionSelect(opt)}
-                    style={{
-                      background: '#fff',
-                      border: '1px solid var(--border-light)',
-                      borderRadius: 20,
-                      padding: '12px 16px',
-                      fontSize: 14,
-                      textAlign: 'left',
-                      cursor: 'pointer',
-                      transition: 'all 0.2s',
-                      boxShadow: '0 2px 4px rgba(0,0,0,0.02)',
-                    }}
-                    onMouseEnter={e => e.currentTarget.style.background = '#faf6f0'}
-                    onMouseLeave={e => e.currentTarget.style.background = '#fff'}
-                  >
-                    {opt.text}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Campo de texto libre */}
-          {showInput && (
-            <form onSubmit={handleTextSubmit} style={{ marginBottom: 16, marginLeft: 8 }}>
-              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                <input
-                  ref={inputRef}
-                  type="text"
-                  value={userInput}
-                  onChange={e => setUserInput(e.target.value)}
-                  placeholder={node.placeholder || 'Escriba su respuesta...'}
-                  style={{
-                    flex: 1,
-                    padding: '12px 16px',
-                    borderRadius: 24,
-                    border: '1px solid var(--border-light)',
-                    fontSize: 14,
-                    outline: 'none',
-                    background: '#fff',
-                  }}
-                />
-                <button
-                  type="submit"
-                  style={{
-                    background: 'var(--accent)',
-                    color: '#fff',
-                    border: 'none',
-                    borderRadius: 24,
-                    padding: '12px 20px',
-                    fontWeight: 600,
-                    cursor: 'pointer',
-                  }}
-                >
-                  Enviar
-                </button>
-              </div>
-            </form>
-          )}
-        </div>
-      );
+  const exportAllCSV = () => {
+    if (interviews.length === 0) return;
+    
+    const headers = [
+      'ID', 'Fecha', 'Score', 'Positivas', 'Neutras', 'Negativas',
+      'Nombre', 'Zona', 'Disposición a pagar', 'Contacto', 'Respuestas clave'
+    ];
+    
+    const rows = interviews.map(iv => {
+      const data = iv.collectedData || {};
+      return [
+        iv.id,
+        new Date(iv.metadata.timestamp).toLocaleString(),
+        iv.metadata.score,
+        iv.metadata.signals.positive,
+        iv.metadata.signals.neutral,
+        iv.metadata.signals.negative,
+        data.vetName || '',
+        data.zone || '',
+        data.willingnessAmount || '',
+        data.contactWhatsApp || data.contact || '',
+        iv.signalsList?.map(s => `${s.signal}:${s.response}`).join('; ') || ''
+      ];
     });
+    
+    const csvContent = [headers, ...rows]
+      .map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(','))
+      .join('\n');
+    
+    const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `tsoralta_entrevistas_${new Date().toISOString().slice(0,10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
-  // Pantalla final / resumen
-  if (isEnd && showSummary) {
+  if (!authenticated) {
     return (
-      <div style={{ padding: 24, maxWidth: 600, margin: '0 auto' }}>
-        <div style={{ background: '#fff', borderRadius: 24, padding: 24, boxShadow: 'var(--shadow)' }}>
-          <h2 style={{ color: 'var(--accent)', marginBottom: 16 }}>📋 Resumen de la conversación</h2>
-          <div style={{ marginBottom: 20 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-around', marginBottom: 20 }}>
-              <div style={{ textAlign: 'center' }}>
-                <div style={{ fontSize: 32, fontWeight: 700, color: SIGNAL_CONFIG.positive.color }}>{summary.pos}</div>
-                <div>Señales positivas</div>
-              </div>
-              <div style={{ textAlign: 'center' }}>
-                <div style={{ fontSize: 32, fontWeight: 700, color: SIGNAL_CONFIG.neutral.color }}>{summary.neu}</div>
-                <div>Neutras</div>
-              </div>
-              <div style={{ textAlign: 'center' }}>
-                <div style={{ fontSize: 32, fontWeight: 700, color: SIGNAL_CONFIG.negative.color }}>{summary.neg}</div>
-                <div>Negativas</div>
-              </div>
-            </div>
-            <div style={{ background: '#f0f0f0', borderRadius: 12, padding: 12, textAlign: 'center' }}>
-              <span style={{ fontWeight: 600 }}>Score de validación: </span>
-              <span style={{ fontSize: 24, fontWeight: 800, color: summary.score >= 70 ? '#2e7d32' : summary.score >= 40 ? '#b45f2b' : '#c62828' }}>
-                {summary.score}/100
-              </span>
-            </div>
-          </div>
-
-          <h3>Datos recopilados:</h3>
-          <pre style={{ background: '#f9f9f9', padding: 16, borderRadius: 12, fontSize: 13, overflowX: 'auto' }}>
-            {JSON.stringify(collectedData, null, 2)}
-          </pre>
-
-          <h3 style={{ marginTop: 20 }}>Señales registradas:</h3>
-          <ul style={{ paddingLeft: 20 }}>
-            {signals.map((s, i) => (
-              <li key={i} style={{ color: SIGNAL_CONFIG[s.signal].color }}>
-                [{s.signal}] {s.response}
-              </li>
-            ))}
-          </ul>
-
-          <button
-            onClick={restart}
-            style={{
-              marginTop: 24,
-              width: '100%',
-              padding: 14,
-              background: 'var(--accent)',
-              color: '#fff',
-              border: 'none',
-              borderRadius: 30,
-              fontWeight: 600,
-              fontSize: 16,
-              cursor: 'pointer',
-            }}
-          >
-            🔄 Iniciar nueva conversación
+      <div style={{ maxWidth: 400, margin: '100px auto', padding: 20 }}>
+        <h2>🔐 Acceso Administrador</h2>
+        <form onSubmit={handleLogin}>
+          <input
+            type="password"
+            value={password}
+            onChange={e => setPassword(e.target.value)}
+            placeholder="Contraseña"
+            style={{ width: '100%', padding: 12, marginBottom: 10, borderRadius: 8, border: '1px solid #ccc' }}
+          />
+          {error && <p style={{ color: 'red' }}>{error}</p>}
+          <button type="submit" style={{ width: '100%', padding: 12, background: '#b45f2b', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600 }}>
+            Ingresar
           </button>
-        </div>
+        </form>
       </div>
     );
   }
 
-  // Chat en progreso o final sin mostrar resumen aún
   return (
-    <div style={{ 
-      maxWidth: 600, 
-      margin: '0 auto', 
-      padding: '20px 16px', 
-      minHeight: '100vh',
-      display: 'flex',
-      flexDirection: 'column',
-      background: 'var(--chat-bg)',
-    }}>
-      {/* Header */}
-      <div style={{ 
-        padding: '16px 0', 
-        borderBottom: '1px solid var(--border-light)',
-        marginBottom: 16,
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center'
-      }}>
+    <div style={{ padding: 24, maxWidth: 1200, margin: '0 auto' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+        <h1>📊 Panel de Entrevistas TSORALTA</h1>
         <div>
-          <h1 style={{ fontSize: 18, fontWeight: 600, color: 'var(--accent)' }}>🩺 TSORALTA · Conversación con veterinarios</h1>
-          <p style={{ fontSize: 12, color: 'var(--text-soft)' }}>Estudio sobre la práctica veterinaria en campo</p>
-        </div>
-        {!isEnd && history.length > 1 && (
-          <button 
-            onClick={restart}
-            style={{
-              background: 'transparent',
-              border: '1px solid var(--border-light)',
-              borderRadius: 20,
-              padding: '6px 12px',
-              fontSize: 12,
-              cursor: 'pointer',
-            }}
-          >
-            Reiniciar
+          <button onClick={exportAllJSON} style={{ marginRight: 10, padding: '8px 16px', background: '#333', color: '#fff', border: 'none', borderRadius: 6 }}>
+            ⬇️ Exportar JSON
           </button>
-        )}
+          <button onClick={exportAllCSV} style={{ marginRight: 10, padding: '8px 16px', background: '#2e7d32', color: '#fff', border: 'none', borderRadius: 6 }}>
+            📄 Exportar CSV
+          </button>
+          <button onClick={deleteAll} style={{ padding: '8px 16px', background: '#c62828', color: '#fff', border: 'none', borderRadius: 6 }}>
+            🗑️ Eliminar todo
+          </button>
+        </div>
       </div>
 
-      {/* Mensajes */}
-      <div style={{ flex: 1 }}>
-        {renderMessages()}
-        <div ref={chatEndRef} />
+      <p>Total de entrevistas almacenadas: <strong>{interviews.length}</strong></p>
+
+      <div style={{ display: 'flex', gap: 20 }}>
+        <div style={{ flex: 1, maxWidth: 300, borderRight: '1px solid #ddd', paddingRight: 20 }}>
+          <h3>Entrevistas</h3>
+          {interviews.length === 0 ? (
+            <p>No hay entrevistas aún.</p>
+          ) : (
+            <ul style={{ listStyle: 'none', padding: 0 }}>
+              {interviews.slice().reverse().map(iv => (
+                <li key={iv.id} style={{
+                  padding: 10, marginBottom: 8, background: selectedInterview?.id === iv.id ? '#f0e6d2' : '#f9f9f9',
+                  borderRadius: 8, cursor: 'pointer', border: '1px solid #ddd'
+                }} onClick={() => setSelectedInterview(iv)}>
+                  <div style={{ fontWeight: 600 }}>{iv.collectedData?.vetName || 'Anónimo'}</div>
+                  <div style={{ fontSize: 12, color: '#666' }}>{new Date(iv.metadata.timestamp).toLocaleString()}</div>
+                  <div style={{ fontSize: 12 }}>Score: {iv.metadata.score}/100</div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+
+        <div style={{ flex: 2 }}>
+          {selectedInterview ? (
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}>
+                <h3>Detalle de entrevista</h3>
+                <button onClick={() => deleteInterview(selectedInterview.id)} style={{ padding: '4px 12px', background: '#ffebee', border: '1px solid #c62828', borderRadius: 6, color: '#c62828' }}>
+                  Eliminar esta
+                </button>
+              </div>
+              <pre style={{ background: '#f5f5f5', padding: 16, borderRadius: 8, overflowX: 'auto', fontSize: 13 }}>
+                {JSON.stringify(selectedInterview, null, 2)}
+              </pre>
+            </div>
+          ) : (
+            <p>Selecciona una entrevista para ver los detalles.</p>
+          )}
+        </div>
       </div>
-
-      {/* Botón para finalizar y ver resumen (si ya terminó la conversación) */}
-      {isEnd && !showSummary && (
-        <div style={{ marginTop: 24 }}>
-          <button
-            onClick={() => setShowSummary(true)}
-            style={{
-              width: '100%',
-              padding: 16,
-              background: 'var(--accent)',
-              color: '#fff',
-              border: 'none',
-              borderRadius: 30,
-              fontWeight: 600,
-              fontSize: 16,
-              cursor: 'pointer',
-            }}
-          >
-            Ver resumen de la conversación
-          </button>
-          <button
-            onClick={restart}
-            style={{
-              width: '100%',
-              marginTop: 12,
-              padding: 14,
-              background: 'transparent',
-              border: '1px solid var(--border-light)',
-              borderRadius: 30,
-              fontWeight: 500,
-              cursor: 'pointer',
-            }}
-          >
-            Comenzar otra entrevista
-          </button>
-        </div>
-      )}
-
-      {/* Indicador de señales (sutil) */}
-      {!isEnd && (
-        <div style={{ marginTop: 16, display: 'flex', justifyContent: 'center', gap: 16 }}>
-          <span style={{ fontSize: 12, color: SIGNAL_CONFIG.positive.color }}>▲ {summary.pos}</span>
-          <span style={{ fontSize: 12, color: SIGNAL_CONFIG.neutral.color }}>● {summary.neu}</span>
-          <span style={{ fontSize: 12, color: SIGNAL_CONFIG.negative.color }}>▼ {summary.neg}</span>
-        </div>
-      )}
     </div>
   );
 }
