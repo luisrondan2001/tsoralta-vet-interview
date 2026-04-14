@@ -1,190 +1,273 @@
-import { useState, useEffect } from 'react';
-
-const STORAGE_KEY = 'tsoralta_interviews';
-const ADMIN_PASSWORD = 'tsoralta2024'; // Cámbiala por una más segura
-
-export default function AdminPanel() {
-  const [authenticated, setAuthenticated] = useState(false);
-  const [password, setPassword] = useState('');
-  const [interviews, setInterviews] = useState([]);
-  const [selectedInterview, setSelectedInterview] = useState(null);
-  const [error, setError] = useState('');
-
-  useEffect(() => {
-    if (authenticated) {
-      loadInterviews();
-    }
-  }, [authenticated]);
-
-  const loadInterviews = () => {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored) {
-      try {
-        setInterviews(JSON.parse(stored));
-      } catch (e) {
-        setInterviews([]);
-      }
-    } else {
-      setInterviews([]);
-    }
-  };
-
-  const handleLogin = (e) => {
-    e.preventDefault();
-    if (password === ADMIN_PASSWORD) {
-      setAuthenticated(true);
-      setError('');
-    } else {
-      setError('Contraseña incorrecta');
-    }
-  };
-
-  const deleteInterview = (id) => {
-    const updated = interviews.filter(i => i.id !== id);
-    setInterviews(updated);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
-    if (selectedInterview?.id === id) setSelectedInterview(null);
-  };
-
-  const deleteAll = () => {
-    if (window.confirm('¿Seguro que quieres eliminar TODAS las entrevistas?')) {
-      setInterviews([]);
-      localStorage.removeItem(STORAGE_KEY);
-      setSelectedInterview(null);
-    }
-  };
-
-  const exportAllJSON = () => {
-    const dataStr = JSON.stringify(interviews, null, 2);
-    const blob = new Blob([dataStr], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `tsoralta_entrevistas_${new Date().toISOString().slice(0,10)}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
-  const exportAllCSV = () => {
-    if (interviews.length === 0) return;
-    
-    // Cabeceras del CSV
-    const headers = [
-      'ID', 'Fecha', 'Score', 'Positivas', 'Neutras', 'Negativas',
-      'Nombre', 'Zona', 'Disposición a pagar', 'Contacto', 'Respuestas clave'
-    ];
-    
-    const rows = interviews.map(iv => {
-      const data = iv.collectedData || {};
-      return [
-        iv.id,
-        new Date(iv.metadata.timestamp).toLocaleString(),
-        iv.metadata.score,
-        iv.metadata.signals.positive,
-        iv.metadata.signals.neutral,
-        iv.metadata.signals.negative,
-        data.vetName || '',
-        data.zone || '',
-        data.willingnessAmount || '',
-        data.contactWhatsApp || data.contact || '',
-        iv.signalsList?.map(s => `${s.signal}:${s.response}`).join('; ') || ''
-      ];
-    });
-    
-    const csvContent = [headers, ...rows]
-      .map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(','))
-      .join('\n');
-    
-    const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' }); // BOM para UTF-8
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `tsoralta_entrevistas_${new Date().toISOString().slice(0,10)}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
-  if (!authenticated) {
-    return (
-      <div style={{ maxWidth: 400, margin: '100px auto', padding: 20 }}>
-        <h2>🔐 Acceso Administrador</h2>
-        <form onSubmit={handleLogin}>
-          <input
-            type="password"
-            value={password}
-            onChange={e => setPassword(e.target.value)}
-            placeholder="Contraseña"
-            style={{ width: '100%', padding: 12, marginBottom: 10, borderRadius: 8, border: '1px solid #ccc' }}
-          />
-          {error && <p style={{ color: 'red' }}>{error}</p>}
-          <button type="submit" style={{ width: '100%', padding: 12, background: '#b45f2b', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600 }}>
-            Ingresar
-          </button>
-        </form>
-      </div>
-    );
+export const conversationTree = {
+  welcome: {
+    id: 'welcome',
+    speaker: 'assistant',
+    text: "👨‍⚕️ ¡Doc! Gracias por tomarse unos minutos. Estamos conversando con veterinarios de campo en la sierra para entender mejor su día a día. No hay respuestas correctas ni incorrectas, solo queremos aprender de su experiencia. ¿Le parece si empezamos?",
+    options: [
+      { text: "Claro, adelante", next: "intro_name" }
+    ]
+  },
+  intro_name: {
+    id: 'intro_name',
+    speaker: 'assistant',
+    text: "Primero, ¿cómo le gusta que le llamen? (Opcional)",
+    inputType: 'text',
+    placeholder: "Ej: Doc Juan, Dra. María...",
+    next: "q_zone",
+    saveAs: 'vetName'
+  },
+  q_zone: {
+    id: 'q_zone',
+    speaker: 'assistant',
+    text: "¿En qué zona trabaja principalmente? (Ej: provincia, distrito)",
+    inputType: 'text',
+    placeholder: "Ej: Canchis, Anta, Quispicanchi...",
+    next: "q_routine",
+    saveAs: 'zone'
+  },
+  q_routine: {
+    id: 'q_routine',
+    speaker: 'assistant',
+    text: "Cuénteme un poco, Doc: ¿cómo es un día típico para usted? Desde que sale de casa hasta que regresa.",
+    tip: "Dejar que describa libremente. Identificar si menciona papeleo, registros, reportes.",
+    options: [
+      { text: "Describe visitas a ganaderos, atención clínica, etc.", next: "q_routine_follow" }
+    ]
+  },
+  q_routine_follow: {
+    id: 'q_routine_follow',
+    speaker: 'assistant',
+    text: "¿Y después de atender a los animales, hay algo más que tenga que hacer? ¿Anotar en algún lado, avisar a alguien, preparar algo para el ganadero?",
+    options: [
+      { text: "Sí, siempre anoto en mi cuaderno/libreta", next: "q_pain_detail", signal: "positive" },
+      { text: "A veces hago un certificado de vacunación", next: "q_cert_demand", signal: "positive" },
+      { text: "Mando un reporte por WhatsApp al dueño", next: "q_whatsapp_usage", signal: "neutral" },
+      { text: "No, con la visita ya está, nada más", next: "q_no_admin", signal: "negative" }
+    ]
+  },
+  q_no_admin: {
+    id: 'q_no_admin',
+    speaker: 'assistant',
+    text: "Entiendo. Y cuando hay campañas de SENASA o el municipio pide algún informe, ¿cómo se las arregla?",
+    options: [
+      { text: "Ahí sí tengo que preparar un informe", next: "q_pain_detail", signal: "neutral" },
+      { text: "Nunca me han pedido nada", next: "q_clients", signal: "negative" }
+    ]
+  },
+  q_pain_detail: {
+    id: 'q_pain_detail',
+    speaker: 'assistant',
+    text: "Cuando tiene que hacer esos registros o informes, ¿cuánto tiempo le toma más o menos?",
+    options: [
+      { text: "Menos de 15 minutos", next: "q_clients", signal: "negative" },
+      { text: "Entre 15 y 30 minutos", next: "q_clients", signal: "neutral" },
+      { text: "Más de media hora, a veces una hora", next: "q_clients", signal: "positive" },
+      { text: "Depende, pero me quita tiempo de descanso", next: "q_clients", signal: "positive" }
+    ]
+  },
+  q_whatsapp_usage: {
+    id: 'q_whatsapp_usage',
+    speaker: 'assistant',
+    text: "Ah, usa WhatsApp. ¿Y le funciona bien? ¿No se le pierden los mensajes o las fotos de recetas?",
+    options: [
+      { text: "A veces se me llena la memoria y tengo que borrar", next: "q_clients", signal: "positive" },
+      { text: "No, todo bien, lo manejo sin problema", next: "q_clients", signal: "neutral" }
+    ]
+  },
+  q_clients: {
+    id: 'q_clients',
+    speaker: 'assistant',
+    text: "Cambiando de tema, Doc. ¿A cuántos ganaderos atiende en una semana normal? ¿Son siempre los mismos o van rotando?",
+    options: [
+      { text: "Tengo mis clientes fijos, unos 10-20", next: "q_client_relation", signal: "positive" },
+      { text: "Varía mucho, a veces 5, a veces 30", next: "q_client_acquisition", signal: "neutral" },
+      { text: "Trabajo para una institución/municipio", next: "q_institutional", signal: "neutral" }
+    ]
+  },
+  q_client_relation: {
+    id: 'q_client_relation',
+    speaker: 'assistant',
+    text: "Qué bien. Y esos ganaderos fijos, ¿cada cuánto lo llaman?",
+    options: [
+      { text: "Casi todas las semanas", next: "q_cert_demand", signal: "positive" },
+      { text: "Una vez al mes más o menos", next: "q_cert_demand", signal: "positive" },
+      { text: "Solo cuando hay emergencia", next: "q_cert_demand", signal: "neutral" }
+    ]
+  },
+  q_client_acquisition: {
+    id: 'q_client_acquisition',
+    speaker: 'assistant',
+    text: "¿Y cómo llegan esos clientes nuevos? ¿Lo contactan directamente o usted sale a buscarlos?",
+    options: [
+      { text: "Me recomiendan entre ellos", next: "q_cert_demand", signal: "positive" },
+      { text: "Por campañas del municipio/SENASA", next: "q_cert_demand", signal: "neutral" },
+      { text: "Tengo que ir a ofrecer mis servicios", next: "q_cert_demand", signal: "negative" }
+    ]
+  },
+  q_institutional: {
+    id: 'q_institutional',
+    speaker: 'assistant',
+    text: "Entiendo. Y además del trabajo institucional, ¿atiende ganaderos por su cuenta?",
+    options: [
+      { text: "Sí, también tengo mis clientes particulares", next: "q_client_relation", signal: "positive" },
+      { text: "No, solo lo institucional", next: "q_cert_demand", signal: "negative" }
+    ]
+  },
+  q_cert_demand: {
+    id: 'q_cert_demand',
+    speaker: 'assistant',
+    text: "Doc, una consulta. La última vez que un ganadero le pidió un certificado de vacunación o algo para vender un animal, ¿cómo lo hizo? Cuénteme el paso a paso.",
+    tip: "Clave: si describe un proceso manual engorroso, hay dolor.",
+    options: [
+      { text: "Lo escribo a mano en un formato que tengo", next: "q_cert_time", signal: "positive" },
+      { text: "Lo hago en la computadora y lo imprimo", next: "q_cert_time", signal: "neutral" },
+      { text: "Nunca me han pedido", next: "q_senasa", signal: "negative" }
+    ]
+  },
+  q_cert_time: {
+    id: 'q_cert_time',
+    speaker: 'assistant',
+    text: "¿Y ese proceso le toma mucho tiempo?",
+    options: [
+      { text: "Sí, es tedioso, tengo que buscar datos", next: "q_cert_frequency", signal: "positive" },
+      { text: "No, es rápido", next: "q_cert_frequency", signal: "neutral" }
+    ]
+  },
+  q_cert_frequency: {
+    id: 'q_cert_frequency',
+    speaker: 'assistant',
+    text: "¿Con qué frecuencia le piden ese tipo de documentos?",
+    options: [
+      { text: "Todas las semanas", next: "q_cert_value", signal: "positive" },
+      { text: "Una o dos veces al mes", next: "q_cert_value", signal: "positive" },
+      { text: "Muy de vez en cuando", next: "q_cert_value", signal: "neutral" }
+    ]
+  },
+  q_cert_value: {
+    id: 'q_cert_value',
+    speaker: 'assistant',
+    text: "Y el ganadero, ¿le paga algo extra por ese certificado o va incluido en la consulta?",
+    options: [
+      { text: "Sí, cobro aparte", next: "q_senasa", signal: "positive" },
+      { text: "No, es parte del servicio", next: "q_senasa", signal: "neutral" }
+    ]
+  },
+  q_senasa: {
+    id: 'q_senasa',
+    speaker: 'assistant',
+    text: "Hablando de las autoridades, ¿SENASA o el municipio le piden a usted algún tipo de reporte de los animales que atiende?",
+    options: [
+      { text: "Sí, todos los meses", next: "q_senasa_process", signal: "positive" },
+      { text: "Solo cuando hay campañas", next: "q_senasa_process", signal: "neutral" },
+      { text: "Nunca", next: "q_tools", signal: "negative" }
+    ]
+  },
+  q_senasa_process: {
+    id: 'q_senasa_process',
+    speaker: 'assistant',
+    text: "¿Y cómo hace para entregar esa información? ¿Le resulta complicado?",
+    options: [
+      { text: "Lleno planillas a mano y las llevo", next: "q_tools", signal: "positive" },
+      { text: "Las envío por correo o WhatsApp", next: "q_tools", signal: "neutral" },
+      { text: "Es fácil, solo firmo algo", next: "q_tools", signal: "negative" }
+    ]
+  },
+  q_tools: {
+    id: 'q_tools',
+    speaker: 'assistant',
+    text: "Ya casi terminamos, Doc. Pensando en todo lo que usa para su trabajo: cuadernos, lapiceros, recargas, gasolina, etc. ¿Más o menos cuánto gasta al mes en esas cosas?",
+    options: [
+      { text: "Menos de 50 soles", next: "q_digital", signal: "negative" },
+      { text: "Entre 50 y 150 soles", next: "q_digital", signal: "neutral" },
+      { text: "Más de 150 soles", next: "q_digital", signal: "positive" }
+    ]
+  },
+  q_digital: {
+    id: 'q_digital',
+    speaker: 'assistant',
+    text: "¿Y ha usado alguna vez una aplicación en el celular para su trabajo? No necesariamente para animales, cualquier cosa que le ayude.",
+    options: [
+      { text: "Sí, uso apps para notas, mapas, etc.", next: "q_paid_apps", signal: "positive" },
+      { text: "Solo WhatsApp", next: "q_willingness", signal: "neutral" },
+      { text: "No, solo llamadas", next: "q_willingness", signal: "negative" }
+    ]
+  },
+  q_paid_apps: {
+    id: 'q_paid_apps',
+    speaker: 'assistant',
+    text: "¿Y alguna vez pagó por alguna de esas aplicaciones?",
+    options: [
+      { text: "Sí, pagué por una app", next: "q_paid_detail", signal: "positive" },
+      { text: "No, solo uso las gratis", next: "q_willingness", signal: "neutral" }
+    ]
+  },
+  q_paid_detail: {
+    id: 'q_paid_detail',
+    speaker: 'assistant',
+    text: "¡Qué interesante! ¿Se acuerda cuánto pagaba y para qué era?",
+    inputType: 'text',
+    placeholder: "Ej: 20 soles/mes para...",
+    next: "q_willingness",
+    saveAs: 'paidAppDetail'
+  },
+  q_willingness: {
+    id: 'q_willingness',
+    speaker: 'assistant',
+    text: "Última pregunta, Doc. Si existiera algo que le ahorrara todo el tiempo que gasta en papeleo, certificados y reportes… ¿cuánto cree que valdría eso para usted al mes? (Puede decir un número o 'nada')",
+    inputType: 'text',
+    placeholder: "Ej: 50 soles, 100 soles, nada...",
+    next: "q_closing",
+    saveAs: 'willingnessAmount'
+  },
+  q_closing: {
+    id: 'q_closing',
+    speaker: 'assistant',
+    text: "Doc, de todo lo que hemos conversado, ¿qué es lo que más le quita el sueño o le complica la vida en su trabajo?",
+    options: [
+      { text: "El papeleo / certificados / reportes", next: "q_referral", signal: "positive" },
+      { text: "El transporte / distancias / gasolina", next: "q_referral", signal: "negative" },
+      { text: "Los cobros / la informalidad", next: "q_referral", signal: "negative" },
+      { text: "La falta de medicamentos / insumos", next: "q_referral", signal: "neutral" }
+    ]
+  },
+  q_referral: {
+    id: 'q_referral',
+    speaker: 'assistant',
+    text: "Muchas gracias por su tiempo, Doc. ¿Conoce a algún colega que trabaje en otra zona y que también pueda compartir su experiencia? Nos ayudaría un montón.",
+    options: [
+      { text: "Sí, le paso el contacto", next: "end_positive", signal: "positive" },
+      { text: "Déjeme pensarlo", next: "end_neutral", signal: "neutral" },
+      { text: "No, lo siento", next: "end_neutral", signal: "negative" }
+    ]
+  },
+  end_positive: {
+    id: 'end_positive',
+    speaker: 'assistant',
+    text: "¡Excelente! Le agradecemos muchísimo. Si le interesa, podemos enviarle un resumen de lo que estamos armando para ayudar a veterinarios como usted. ¿Quiere dejar su WhatsApp?",
+    inputType: 'text',
+    placeholder: "WhatsApp (opcional)",
+    next: "final",
+    saveAs: 'contactWhatsApp'
+  },
+  end_neutral: {
+    id: 'end_neutral',
+    speaker: 'assistant',
+    text: "No hay problema, Doc. Le agradecemos enormemente su tiempo. Si más adelante quiere saber más de este proyecto, puede dejar su contacto.",
+    inputType: 'text',
+    placeholder: "WhatsApp o correo (opcional)",
+    next: "final",
+    saveAs: 'contact'
+  },
+  final: {
+    id: 'final',
+    speaker: 'assistant',
+    text: "¡Listo! Hemos terminado. Muchas gracias por compartir su experiencia. Que tenga un excelente día.",
+    isEnd: true
   }
+};
 
-  return (
-    <div style={{ padding: 24, maxWidth: 1200, margin: '0 auto' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-        <h1>📊 Panel de Entrevistas TSORALTA</h1>
-        <div>
-          <button onClick={exportAllJSON} style={{ marginRight: 10, padding: '8px 16px', background: '#333', color: '#fff', border: 'none', borderRadius: 6 }}>
-            ⬇️ Exportar JSON
-          </button>
-          <button onClick={exportAllCSV} style={{ marginRight: 10, padding: '8px 16px', background: '#2e7d32', color: '#fff', border: 'none', borderRadius: 6 }}>
-            📄 Exportar CSV
-          </button>
-          <button onClick={deleteAll} style={{ padding: '8px 16px', background: '#c62828', color: '#fff', border: 'none', borderRadius: 6 }}>
-            🗑️ Eliminar todo
-          </button>
-        </div>
-      </div>
-
-      <p>Total de entrevistas almacenadas: <strong>{interviews.length}</strong></p>
-
-      <div style={{ display: 'flex', gap: 20 }}>
-        {/* Lista de entrevistas */}
-        <div style={{ flex: 1, maxWidth: 300, borderRight: '1px solid #ddd', paddingRight: 20 }}>
-          <h3>Entrevistas</h3>
-          {interviews.length === 0 ? (
-            <p>No hay entrevistas aún.</p>
-          ) : (
-            <ul style={{ listStyle: 'none', padding: 0 }}>
-              {interviews.slice().reverse().map(iv => (
-                <li key={iv.id} style={{
-                  padding: 10, marginBottom: 8, background: selectedInterview?.id === iv.id ? '#f0e6d2' : '#f9f9f9',
-                  borderRadius: 8, cursor: 'pointer', border: '1px solid #ddd'
-                }} onClick={() => setSelectedInterview(iv)}>
-                  <div style={{ fontWeight: 600 }}>{iv.collectedData?.vetName || 'Anónimo'}</div>
-                  <div style={{ fontSize: 12, color: '#666' }}>{new Date(iv.metadata.timestamp).toLocaleString()}</div>
-                  <div style={{ fontSize: 12 }}>Score: {iv.metadata.score}/100</div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-
-        {/* Detalle de entrevista seleccionada */}
-        <div style={{ flex: 2 }}>
-          {selectedInterview ? (
-            <div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}>
-                <h3>Detalle de entrevista</h3>
-                <button onClick={() => deleteInterview(selectedInterview.id)} style={{ padding: '4px 12px', background: '#ffebee', border: '1px solid #c62828', borderRadius: 6, color: '#c62828' }}>
-                  Eliminar esta
-                </button>
-              </div>
-              <pre style={{ background: '#f5f5f5', padding: 16, borderRadius: 8, overflowX: 'auto', fontSize: 13 }}>
-                {JSON.stringify(selectedInterview, null, 2)}
-              </pre>
-            </div>
-          ) : (
-            <p>Selecciona una entrevista para ver los detalles.</p>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
+export const SIGNAL_CONFIG = {
+  positive: { color: '#2e7d32', bg: '#e8f5e9', label: 'Positiva' },
+  neutral:  { color: '#b45f2b', bg: '#fff3e0', label: 'Neutra' },
+  negative: { color: '#c62828', bg: '#ffebee', label: 'Negativa' }
+};
