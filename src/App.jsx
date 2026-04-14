@@ -66,7 +66,26 @@ export default function App() {
       }
     }
     interviews.push(interviewData);
+   async function guardarEntrevistasEnSupabase(interviews) {
+  try {
+    // Supabase espera un array de objetos. Si 'interviews' es un array, lo insertamos directamente.
+    // Si 'interviews' es un objeto único, usa .insert([interviews])
+    const { data, error } = await supabase
+      .from('entrevistas')
+      .insert(interviews)  // interviews debe ser un array de objetos
+      .select();
+
+    if (error) throw error;
+    console.log('✅ Entrevistas guardadas en Supabase:', data);
+  } catch (err) {
+    console.error('❌ Error al guardar en Supabase:', err.message);
+    // Opcional: mantener respaldo en localStorage por si falla
     localStorage.setItem(STORAGE_KEY, JSON.stringify(interviews));
+  }
+}
+
+// Llamar a la función en lugar de localStorage.setItem
+guardarEntrevistasEnSupabase(interviews);
   };
 
   const handleOptionSelect = (option) => {
